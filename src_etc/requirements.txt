@@ -1,0 +1,17 @@
+faiss_cpu==1.8.0
+huggingface_hub==0.23.4
+langchain==0.2.11
+langchain_chroma==0.1.2
+langchain_community==0.2.10
+langchain_core==0.2.24
+langchain_openai==0.1.19
+nltk==3.8.1
+numpy==2.0.1
+openai==1.37.1
+python-dotenv==1.0.1
+pywin32==306
+Requests==2.32.3
+sentence_transformers==3.0.1
+streamlit==1.36.0
+transformers==4.40.1
+~treamlit==1.35.0
