@@ -3,7 +3,7 @@ import streamlit as st
 from typing import List, Dict, Any, Union
 from pydantic import BaseModel
 from groq import Groq
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 from pathlib import Path
 from langchain.schema import Document
 
@@ -17,18 +17,19 @@ class GroqManager:
         
         # 프로젝트 루트 디렉토리 경로 설정
         project_root = Path(__file__).parent.parent
-
+        
         # .env 파일의 경로 설정
-        env_path = project_root / '.env'
-
+        self.env_path = project_root / '.env'
+        
         # .env 파일 로드
-        load_dotenv(dotenv_path=env_path)
-                
+        load_dotenv(dotenv_path=self.env_path)
+        
         # GROQ_API_KEY 환경 변수에서 API 키 가져오기
         self.api_key = os.environ.get("GROQ_API_KEY")
-        if not self.api_key:
-            raise ValueError("GROQ_API_KEY 환경 변수가 설정되지 않았습니다.")
         
+        if not self.api_key:
+           print('API Key가 입력되지 않았습니다.')
+           self.apikey = ""
         # Groq 클라이언트 초기화
         self.client = Groq(api_key=self.api_key)
 
@@ -55,7 +56,7 @@ Please provide a detailed answer based on the given context:"""
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0,
-                max_tokens=2048
+                max_tokens=4096
             )
 
             answer = response.choices[0].message.content

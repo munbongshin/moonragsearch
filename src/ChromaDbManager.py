@@ -9,14 +9,14 @@ import logging
 from openpyxl import load_workbook
 from pptx import Presentation
 import json
-
+import numpy as np
 from langchain_community.vectorstores import Chroma
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
 
 from ExtractTextFromFile import ExtractTextFromFile
 from CustomSentenceTransformerEmbeddings import CustomSentenceTransformerEmbeddings as CSTFM
-
+import re
       
 class ChromaDbManager:
     def __init__(self, persist_directory=""):
@@ -234,29 +234,85 @@ class ChromaDbManager:
         except Exception as e:
             logger.error(f"Error in split_embed_docs_store: {e}", exc_info=True)
             raise
+        
+    def rerank_with_advanced_model(self, query, initial_results, model_name='all-MiniLM-L6-v2', top_k=None):
+        """
+        고급 모델을 사용하여 초기 검색 결과를 재랭킹하고 metadata를 포함하여 반환합니다.
 
+        :param query: 검색 쿼리 문자열
+        :param initial_results: 초기 검색 결과 리스트 (각 항목은 딕셔너리 형태)
+        :param model_name: 사용할 Sentence Transformer 모델 이름
+        :param top_k: 반환할 상위 결과 수 (None이면 모든 결과 반환)
+        :return: 재랭킹된 결과 리스트 (metadata 포함)
+        """
+        # 모델 로드
+        model = SentenceTransformer(model_name)
 
-    def search_collection(self, collection_name, query, n_results, inscore=350):
-        vectordb = self.get_or_create_collection(collection_name)
-        
-        # query_embedding은 이제 필요 없습니다.
-        # query_embedding = self.embeddings.embed_query(query)
-        
-        self.set_return_docnum(n_results)
-        
-        results = vectordb.similarity_search_with_score(query, k=n_results)
-        
-        formatted_results = []
-        for doc, score in results:
-            if score <= inscore:
-                formatted_results.append({
-                    'page_content': doc.page_content,
-                    'metadata': doc.metadata,
-                    'score': score
-                })
-        
-        return formatted_results
-    
+        # 쿼리 임베딩
+        query_embedding = model.encode(query, convert_to_tensor=True)
+
+        # 문서 내용 추출 및 임베딩
+        docs = [result['content'] for result in initial_results]
+        doc_embeddings = model.encode(docs, convert_to_tensor=True)
+
+        # 코사인 유사도 계산
+        cos_scores = util.cos_sim(query_embedding, doc_embeddings)[0]
+
+        # 결과 정렬
+        top_results = torch.topk(cos_scores, k=len(cos_scores))
+
+        # 재랭킹된 결과 생성
+        reranked_results = []
+        for score, idx in zip(top_results[0], top_results[1]):
+            original_result = initial_results[idx]
+            reranked_result = {
+                'id': original_result.get('id'),
+                'page_content': original_result['content'],
+                'metadata': original_result.get('metadata', {}),  # metadata 포함
+                'original_score': original_result.get('score'),
+                'score': score.item()
+            }
+            reranked_results.append(reranked_result)
+
+        # top_k가 지정된 경우 상위 결과만 반환
+        if top_k is not None:
+            reranked_results = reranked_results[:top_k]
+
+        return reranked_results
+
+    # 사용 예시:
+    # initial_results = [
+    #     {'id': '1', 'content': 'This is the first document', 'score': 0.9, 'metadata': {'author': 'John', 'date': '2023-01-01'}},
+    #     {'id': '2', 'content': 'This is the second document', 'score': 0.8, 'metadata': {'author': 'Jane', 'date': '2023-01-02'}},
+    #     # ...
+    # ]
+    # query = "document search"
+    # reranked_results = rerank_with_advanced_model(query, initial_results, top_k=5)
+
+    #similarity_threshold 값이 높을 수록 정확도가 높아짐
+    def search_collection(self, collection_name, query, n_results, similarity_threshold=0.9):
+        try:
+            vectordb = self.get_or_create_collection(collection_name)
+            
+            # 벡터 검색 수행
+            results = vectordb.similarity_search_with_score(query, k=n_results)                     
+            # 키워드 추출 (간단한 방식, 필요에 따라 더 정교한 방법 사용 가능)
+            keywords = set(re.findall(r'\w+', query.lower()))
+            
+            filtered_results = []
+            for doc, score in results:
+                # 유사도 점수가 임계값보다 높고, 키워드가 문서 내용에 존재하는 경우만 포함
+                if score >= similarity_threshold and any(keyword in doc.page_content.lower() for keyword in keywords):
+                    filtered_results.append({
+                        'page_content': doc.page_content,
+                        'metadata': doc.metadata,
+                        'score': score
+                    })
+            
+            return filtered_results
+        except Exception as e:
+            print(f"Error in search_collection: {str(e)}")
+            return []
 
     def get_all_documents_source(self, collection_name, source_search):
         collection = self.client.get_collection(collection_name)
